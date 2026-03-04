@@ -1,8 +1,8 @@
 """
-resume_parser.py
-────────────────
-Extract text from a Resume PDF and produce a concise LLM-generated summary
-of skills, experience, and education.
+tools/resume_parser.py
+──────────────────────
+Extract text from a resume PDF and produce a structured LLM summary
+for email personalisation.
 """
 
 from pypdf import PdfReader
@@ -11,17 +11,14 @@ from langchain_core.messages import SystemMessage, HumanMessage
 
 
 def extract_text_from_pdf(pdf_path: str) -> str:
-    """Read every page of a PDF and return the concatenated text."""
+    """Read every page of a PDF and return concatenated text."""
     reader = PdfReader(pdf_path)
     pages = [page.extract_text() or "" for page in reader.pages]
     return "\n".join(pages).strip()
 
 
 def summarize_resume(raw_text: str, groq_api_key: str) -> str:
-    """
-    Send the raw resume text to ChatGroq and get back a structured summary
-    suitable for email personalisation.
-    """
+    """Send raw resume text to Groq LLM and get a structured summary."""
     llm = ChatGroq(
         model="llama-3.3-70b-versatile",
         api_key=groq_api_key,
@@ -31,29 +28,27 @@ def summarize_resume(raw_text: str, groq_api_key: str) -> str:
 
     system_prompt = (
         "You are a resume-analysis assistant. Given the raw text of a resume, "
-        "produce a detailed summary (≤ 300 words) covering:\n"
+        "produce a detailed summary covering:\n"
         "1. Full name\n"
-        "2. Key technical skills — separate Full Stack (languages, frameworks, databases) "
-        "and AI/ML skills (models, frameworks like TensorFlow, PyTorch, LangChain, etc.)\n"
-        "3. ALL projects listed on the resume — include name and 1-line description each\n"
+        "2. Key technical skills (Full Stack + AI/ML)\n"
+        "3. ALL projects with 1-line descriptions\n"
         "4. Education\n"
-        "5. Any notable achievements or certifications\n\n"
-        "Make sure to capture EVERY project and skill — do not skip any.\n"
-        "Output ONLY the summary — no preamble."
+        "5. Notable achievements or certifications\n\n"
+        "Keep it under 300 words. Output ONLY the summary."
     )
 
-    messages = [
+    response = llm.invoke([
         SystemMessage(content=system_prompt),
         HumanMessage(content=f"Resume text:\n\n{raw_text}"),
-    ]
-
-    response = llm.invoke(messages)
+    ])
     return response.content.strip()
 
 
 def parse_resume(pdf_path: str, groq_api_key: str) -> dict:
     """
-    High-level helper: extract text → summarise → return both.
+    High-level: extract text from PDF -> summarise with LLM.
+
+    Returns: {"raw_text": str, "summary": str}
     """
     raw_text = extract_text_from_pdf(pdf_path)
     summary = summarize_resume(raw_text, groq_api_key)

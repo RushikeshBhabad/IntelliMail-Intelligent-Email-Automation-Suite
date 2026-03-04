@@ -1,8 +1,8 @@
 """
-research_tool.py
-────────────────
-Search the internet for basic company information using Tavily
-and return a structured summary via LLM.
+tools/research_tool.py
+──────────────────────
+Search the internet for company information using Tavily
+and return a structured LLM summary for email personalisation.
 """
 
 from tavily import TavilyClient
@@ -16,10 +16,7 @@ def search_company(
     location: str,
     tavily_api_key: str,
 ) -> list[dict]:
-    """
-    Use Tavily to search for company information.
-    Returns a list of result dicts with 'title', 'url', 'content'.
-    """
+    """Use Tavily to search for company info. Returns list of result dicts."""
     client = TavilyClient(api_key=tavily_api_key)
     query = f"{company_name} company {industry} {location} what do they do"
     response = client.search(query=query, max_results=5)
@@ -31,10 +28,7 @@ def summarize_company(
     search_results: list[dict],
     groq_api_key: str,
 ) -> str:
-    """
-    Feed raw search results into ChatGroq to get a short, structured
-    company summary for email personalisation.
-    """
+    """Feed raw search results into Groq LLM to get a concise company summary."""
     llm = ChatGroq(
         model="llama-3.3-70b-versatile",
         api_key=groq_api_key,
@@ -42,14 +36,14 @@ def summarize_company(
         max_tokens=400,
     )
 
-    combined_content = "\n\n".join(
+    combined = "\n\n".join(
         f"Source: {r.get('title', 'N/A')}\n{r.get('content', '')}"
         for r in search_results
     )
 
     system_prompt = (
         "You are a research assistant. Given search results about a company, "
-        "produce a concise summary (≤ 100 words) covering:\n"
+        "produce a concise summary (under 100 words) covering:\n"
         "1. What the company does\n"
         "2. Industry / domain\n"
         "3. Any recent news or notable projects\n"
@@ -57,17 +51,10 @@ def summarize_company(
         "Output ONLY the summary."
     )
 
-    messages = [
+    response = llm.invoke([
         SystemMessage(content=system_prompt),
-        HumanMessage(
-            content=(
-                f"Company: {company_name}\n\n"
-                f"Search results:\n{combined_content}"
-            )
-        ),
-    ]
-
-    response = llm.invoke(messages)
+        HumanMessage(content=f"Company: {company_name}\n\nSearch results:\n{combined}"),
+    ])
     return response.content.strip()
 
 
@@ -79,7 +66,9 @@ def research_company(
     groq_api_key: str,
 ) -> str:
     """
-    End-to-end: Tavily search → LLM summarise → return company context string.
+    End-to-end: Tavily search -> LLM summarise -> return company context.
+
+    This is the main function called by the Outreach Agent.
     """
     results = search_company(company_name, industry, location, tavily_api_key)
     if not results:

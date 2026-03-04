@@ -1,14 +1,14 @@
 """
-email_fetcher.py
-────────────────
+tools/email_fetcher.py
+──────────────────────
 Fetch emails from an IMAP mailbox (Gmail, Outlook, etc.).
 Returns structured email data for the Reply Agent.
 """
 
 import imaplib
 import email as email_lib
+import re
 from email.header import decode_header
-from datetime import datetime
 from typing import Optional
 
 
@@ -28,7 +28,7 @@ def _decode_header_value(value: str) -> str:
 
 def _extract_body(msg: email_lib.message.Message) -> str:
     """
-    Walk a MIME message and return the best plain-text or HTML body.
+    Walk a MIME message and return the best plain-text body.
     Prefers text/plain; falls back to text/html with tags stripped.
     """
     plain_body = ""
@@ -71,7 +71,6 @@ def _extract_body(msg: email_lib.message.Message) -> str:
 
     # Strip HTML tags for a rough plain-text version
     if html_body:
-        import re
         clean = re.sub(r"<style[^>]*>.*?</style>", "", html_body, flags=re.S)
         clean = re.sub(r"<script[^>]*>.*?</script>", "", clean, flags=re.S)
         clean = re.sub(r"<[^>]+>", " ", clean)
@@ -96,35 +95,24 @@ def fetch_emails(
 
     Parameters
     ----------
-    imap_server : str
-        e.g. "imap.gmail.com"
-    email_address : str
-        Login email.
-    email_password : str
-        App password (NOT regular password for Gmail).
-    imap_port : int
-        Default 993 (SSL).
-    folder : str
-        Mailbox folder to read from.
-    filter_mode : str
-        "unread" → only unseen messages.
-        "label"  → messages with a specific Gmail label.
-        "all"    → all recent messages.
-    label : str | None
-        Gmail label to filter by (used when filter_mode == "label").
-    max_results : int
-        Maximum emails to return.
+    imap_server  : e.g. "imap.gmail.com"
+    email_address: Login email
+    email_password: App password (NOT regular password for Gmail)
+    imap_port    : Default 993 (SSL)
+    folder       : Mailbox folder to read from
+    filter_mode  : "unread" | "label" | "all"
+    label        : Gmail label (used when filter_mode == "label")
+    max_results  : Maximum emails to return
 
     Returns
     -------
-    list[dict]
-        Each dict has: uid, sender, sender_email, subject, body,
-        timestamp, thread_id, message_id, is_read.
+    list[dict] — Each dict has keys:
+        uid, sender, sender_email, subject, body, timestamp,
+        thread_id, message_id, in_reply_to, is_read
     """
     emails: list[dict] = []
 
     try:
-        # Connect via SSL
         mail = imaplib.IMAP4_SSL(imap_server, imap_port)
         mail.login(email_address, email_password)
 
@@ -140,8 +128,6 @@ def fetch_emails(
         # Build search criteria
         if filter_mode == "unread":
             criteria = "UNSEEN"
-        elif filter_mode == "label" and label:
-            criteria = "ALL"
         else:
             criteria = "ALL"
 
@@ -151,8 +137,7 @@ def fetch_emails(
             return emails
 
         id_list = msg_ids[0].split()
-        # Take the most recent N
-        id_list = id_list[-max_results:]
+        id_list = id_list[-max_results:]  # most recent N
 
         for uid in id_list:
             status, msg_data = mail.fetch(uid, "(RFC822)")
@@ -170,7 +155,7 @@ def fetch_emails(
             in_reply_to = msg.get("In-Reply-To", "")
             references = msg.get("References", "")
 
-            # Parse sender
+            # Parse sender name and email
             sender_name = from_header
             sender_email_addr = from_header
             if "<" in from_header and ">" in from_header:
@@ -180,13 +165,12 @@ def fetch_emails(
 
             # Parse date
             try:
-                date_tuple = email_lib.utils.parsedate_to_datetime(date_header)
-                timestamp = date_tuple.isoformat()
+                date_obj = email_lib.utils.parsedate_to_datetime(date_header)
+                timestamp = date_obj.isoformat()
             except Exception:
                 timestamp = date_header
 
-            # Thread ID — use References header or Message-ID
-            thread_id = ""
+            # Thread ID
             if references:
                 thread_id = references.split()[0].strip()
             elif in_reply_to:
@@ -194,7 +178,6 @@ def fetch_emails(
             else:
                 thread_id = message_id
 
-            # Body
             body = _extract_body(msg)
 
             emails.append({
@@ -202,7 +185,7 @@ def fetch_emails(
                 "sender": sender_name,
                 "sender_email": sender_email_addr,
                 "subject": subject,
-                "body": body[:3000],  # cap length
+                "body": body[:3000],
                 "timestamp": timestamp,
                 "thread_id": thread_id,
                 "message_id": message_id,
@@ -217,8 +200,7 @@ def fetch_emails(
     except Exception as e:
         raise ConnectionError(f"Failed to fetch emails: {e}")
 
-    # Return newest first
-    emails.reverse()
+    emails.reverse()  # newest first
     return emails
 
 
@@ -230,7 +212,7 @@ def mark_as_read(
     imap_port: int = 993,
     folder: str = "INBOX",
 ) -> bool:
-    """Mark a specific email as read (Seen) on the server."""
+    """Mark a specific email as read (Seen) on the IMAP server."""
     try:
         mail = imaplib.IMAP4_SSL(imap_server, imap_port)
         mail.login(email_address, email_password)
