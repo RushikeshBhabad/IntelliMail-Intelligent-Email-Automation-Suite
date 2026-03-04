@@ -252,17 +252,6 @@ This documentation is designed to be comprehensive enough to explain the entire 
 
 ---
 
-## 🧪 Testing
-
-Send a test email to verify the system works:
-
-```
-Recipient: rushikeshbhabad2005@gmail.com
-```
-
-All three systems can be tested independently through the Streamlit UI.
-
----
 
 ## 📝 License
 
