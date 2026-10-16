@@ -31,7 +31,7 @@ from tools.email_sender import (
     log_sent_email, is_already_sent, rate_limited_sleep,
 )
 from tools.email_fetcher import fetch_emails, mark_as_read
-from tools.resume_parser import parse_resume
+from tools.resume_parser import parse_resume, extract_candidate_name
 
 load_dotenv(os.path.join(ROOT_DIR, ".env"))
 
@@ -109,6 +109,7 @@ def _init_session():
         # Outreach
         "companies": [],
         "resume_summary": "",
+        "resume_name": "",
         "resume_path_tmp": "",
         "excel_path_tmp": "",
         "data_loaded": False,
@@ -140,6 +141,23 @@ def _init_session():
             st.session_state[k] = v
 
 _init_session()
+
+
+def _normalise_company_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Map common spreadsheet headers to the names used by the app."""
+    aliases = {
+        "company": "Company Name",
+        "company name": "Company Name",
+        "email": "Email ID",
+        "email id": "Email ID",
+        "industry": "Industry",
+        "location": "Location",
+    }
+    rename = {
+        column: aliases.get(str(column).strip().lower(), str(column).strip())
+        for column in df.columns
+    }
+    return df.rename(columns=rename)
 
 
 # ══════════════════════════════════════════════════════════
@@ -253,12 +271,14 @@ with tab1:
             st.session_state["excel_path_tmp"] = excel_tmp
 
             resume_data = parse_resume(resume_tmp, groq_api_key)
+            resume_name = extract_candidate_name(resume_data["raw_text"])
             df = pd.read_excel(excel_tmp)
-            df.columns = [c.strip() for c in df.columns]
+            df = _normalise_company_columns(df)
             companies = df.to_dict(orient="records")
 
             st.session_state["companies"] = companies
             st.session_state["resume_summary"] = resume_data["summary"]
+            st.session_state["resume_name"] = resume_name
             st.session_state["data_loaded"] = True
             st.session_state["sent_log"] = []
             st.session_state["current_company_idx"] = 0
@@ -283,7 +303,7 @@ with tab1:
         companies = st.session_state["companies"]
 
         def _company_label(c):
-            name = c.get("Company Name", c.get("company_name", "Unknown"))
+            name = c.get("Company Name", c.get("company_name", c.get("Company", "Unknown")))
             email = c.get("Email ID", c.get("email_id", c.get("Email", "")))
             return f"{name}  \u2022  {email}"
 
@@ -298,7 +318,7 @@ with tab1:
         selected_company = companies[selected_idx]
 
         cname = selected_company.get(
-            "Company Name", selected_company.get("company_name", "")
+            "Company Name", selected_company.get("company_name", selected_company.get("Company", ""))
         )
         cindustry = selected_company.get(
             "Industry", selected_company.get("industry", "")
@@ -344,19 +364,25 @@ with tab1:
                 st.write("\u2705 Research complete.")
 
                 st.write("\u270d\ufe0f Drafting email \u2026")
-                result = do_generate_email(
-                    company_name=cname,
-                    company_research=company_research,
-                    resume_summary=st.session_state["resume_summary"],
-                    groq_api_key=groq_api_key,
-                )
-
-                st.session_state["generated_email"] = result["body"]
-                st.session_state["email_subject"] = result["subject"]
-                st.session_state["email_ready"] = True
-                st.session_state["email_generating"] = False
-                status.update(label="\u2705 Email generated!", state="complete")
-            st.rerun()
+                try:
+                    result = do_generate_email(
+                        company_name=cname,
+                        company_research=company_research,
+                        resume_summary=st.session_state["resume_summary"],
+                        groq_api_key=groq_api_key,
+                        candidate_name=st.session_state["resume_name"],
+                    )
+                except ValueError as error:
+                    st.session_state["email_generating"] = False
+                    status.update(label="\u26a0\ufe0f Generation incomplete", state="error")
+                    st.error(str(error))
+                else:
+                    st.session_state["generated_email"] = result["body"]
+                    st.session_state["email_subject"] = result["subject"]
+                    st.session_state["email_ready"] = True
+                    st.session_state["email_generating"] = False
+                    status.update(label="\u2705 Email generated!", state="complete")
+                    st.rerun()
 
     # Review & Approve
     if st.session_state.get("email_ready"):
@@ -389,7 +415,7 @@ with tab1:
         st.caption(f"Word count: **{wc}** {marker}")
 
         st.markdown("#### \U0001f441\ufe0f Preview")
-        preview = edited_email.replace("\n", "<br>")
+        preview = re.sub(r"\s*\n\s*", " ", edited_email).strip()
         st.markdown(
             f'<div style="background:#f8f9fa;color:#1a1a2e;padding:1.2rem 1.5rem;'
             f'border-radius:10px;font-family:Arial;font-size:14px;line-height:1.7;'
@@ -422,8 +448,16 @@ with tab1:
                     "Email ID", company.get("email_id", company.get("Email", ""))
                 )
                 cname_s = company.get(
-                    "Company Name", company.get("company_name", "Unknown")
+                    "Company Name", company.get("company_name", company.get("Company", "Unknown"))
                 )
+                if not cname_s or cname_s == "Unknown" or not to_email:
+                    st.error("Cannot send: the selected row has no valid company name or email address.")
+                    st.stop()
+                if cname_s.casefold() not in edited_email.casefold():
+                    st.error(
+                        f"Cannot send: the email does not mention the selected company ({cname_s}). Regenerate it."
+                    )
+                    st.stop()
 
                 with st.spinner("\U0001f4e4 Sending \u2026"):
                     result = send_email(
@@ -781,18 +815,24 @@ with tab3:
         with st.status(
             "\u270d\ufe0f Generating email \u2026", expanded=True
         ) as status:
-            result = compose_generate(
-                topic=comp_topic,
-                recipient=comp_recipient,
-                tone=comp_tone.lower(),
-                groq_api_key=groq_api_key,
-            )
-
-            st.session_state["compose_subject"] = result["subject"]
-            st.session_state["compose_body"] = result["body"]
-            st.session_state["compose_ready"] = True
-            st.session_state["compose_generating"] = False
-            status.update(label="\u2705 Email generated!", state="complete")
+            try:
+                result = compose_generate(
+                    topic=comp_topic,
+                    recipient=comp_recipient,
+                    tone=comp_tone.lower(),
+                    groq_api_key=groq_api_key,
+                )
+            except ValueError as error:
+                st.session_state["compose_ready"] = False
+                st.session_state["compose_generating"] = False
+                status.update(label="\u26a0\ufe0f Generation incomplete", state="error")
+                st.error(str(error))
+            else:
+                st.session_state["compose_subject"] = result["subject"]
+                st.session_state["compose_body"] = result["body"]
+                st.session_state["compose_ready"] = True
+                st.session_state["compose_generating"] = False
+                status.update(label="\u2705 Email generated!", state="complete")
 
         st.rerun()
 

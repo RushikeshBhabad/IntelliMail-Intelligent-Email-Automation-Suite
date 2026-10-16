@@ -260,7 +260,7 @@ def generate_email_node(state: OutreachState) -> dict:
 | **Purpose** | Generate a personalised outreach email using the company research and resume |
 | **Reads from state** | `companies`, `current_index`, `company_research`, `resume_summary`, `groq_api_key` |
 | **Writes to state** | `generated_email`, `email_subject`, `approval_status` (reset) |
-| **External calls** | Groq LLM (`llama-3.3-70b-versatile`) |
+| **External calls** | Groq LLM (`openai/gpt-oss-20b` by default, configurable via `GROQ_MODEL`) |
 | **Why it exists** | Core value — AI-generated personalised emails. Resets approval status so regenerated emails require fresh approval. |
 
 **The LLM prompt enforces:**
@@ -1114,7 +1114,7 @@ For a simple 3-step pipeline you don't need LangGraph. But once you add human re
 
 ### Q: Why Groq instead of OpenAI?
 
-**A:** Groq offers free API access with fast inference. The `llama-3.3-70b-versatile` model is comparable in quality to GPT-3.5 for email generation tasks. For a project that focuses on architecture rather than LLM capabilities, the free tier is ideal.
+**A:** Groq offers fast inference and a free tier. This project uses `openai/gpt-oss-20b` by default, and the model can be changed with `GROQ_MODEL` when a different accessible model is preferred.
 
 ### Q: How does the human-in-the-loop work?
 

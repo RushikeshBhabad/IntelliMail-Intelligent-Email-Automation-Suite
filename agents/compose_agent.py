@@ -16,6 +16,7 @@ LangGraph workflow:
 """
 
 from __future__ import annotations
+import os
 from typing import TypedDict
 
 from langchain_groq import ChatGroq
@@ -68,10 +69,11 @@ def do_generate_email(topic: str, recipient: str, tone: str,
     Returns: {"body": str, "subject": str}
     """
     llm = ChatGroq(
-        model="llama-3.3-70b-versatile",
+        model=os.getenv("GROQ_MODEL", "openai/gpt-oss-20b"),
         api_key=groq_api_key,
         temperature=0.7,
-        max_tokens=600,
+        max_tokens=1000,
+        reasoning_effort="low",
     )
 
     system_prompt = (
@@ -124,6 +126,8 @@ def do_generate_email(topic: str, recipient: str, tone: str,
 
     if not subject:
         subject = f"Regarding: {topic[:50]}"
+    if not body:
+        raise ValueError("The model returned an empty email body. Please regenerate.")
 
     return {"body": body, "subject": subject}
 

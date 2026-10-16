@@ -16,6 +16,7 @@ LangGraph workflow:
 
 from __future__ import annotations
 import json
+import os
 from typing import TypedDict
 
 from langchain_groq import ChatGroq
@@ -75,7 +76,7 @@ def do_classify(sender: str, sender_email: str, subject: str,
                 newsletter, spam, other
     """
     llm = ChatGroq(
-        model="llama-3.3-70b-versatile",
+        model=os.getenv("GROQ_MODEL", "openai/gpt-oss-20b"),
         api_key=groq_api_key,
         temperature=0,
         max_tokens=200,
@@ -127,7 +128,7 @@ def do_generate_reply(sender: str, sender_email: str, subject: str,
     Returns: {"body": str, "subject": str}
     """
     llm = ChatGroq(
-        model="llama-3.3-70b-versatile",
+        model=os.getenv("GROQ_MODEL", "openai/gpt-oss-20b"),
         api_key=groq_api_key,
         temperature=0.7,
         max_tokens=500,

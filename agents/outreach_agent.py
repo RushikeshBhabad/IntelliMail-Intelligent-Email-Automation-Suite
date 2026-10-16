@@ -16,6 +16,9 @@ LangGraph workflow:
 """
 
 from __future__ import annotations
+import os
+import html
+import re
 from typing import TypedDict
 
 import pandas as pd
@@ -85,17 +88,19 @@ def do_research(company_name: str, industry: str, location: str,
 
 
 def do_generate_email(company_name: str, company_research: str,
-                      resume_summary: str, groq_api_key: str) -> dict:
+                      resume_summary: str, groq_api_key: str,
+                      candidate_name: str = "") -> dict:
     """
     Generate a personalised outreach email using LLM.
 
     Returns: {"body": str, "subject": str}
     """
     llm = ChatGroq(
-        model="llama-3.3-70b-versatile",
+        model=os.getenv("GROQ_MODEL", "openai/gpt-oss-20b"),
         api_key=groq_api_key,
         temperature=0.7,
-        max_tokens=500,
+        max_tokens=1200,
+        reasoning_effort="low",
     )
 
     system_prompt = (
@@ -103,27 +108,42 @@ def do_generate_email(company_name: str, company_research: str,
         "internship emails in HTML format.\n\n"
         "Structure:\n"
         "PARAGRAPH 1: Introduce yourself \u2014 name (from resume), "
-        "3rd year undergrad from PICT, Pune. "
-        "One sentence about why THIS company interests you.\n\n"
-        "PARAGRAPH 2: Skills and projects \u2014 full-stack (React, Node.js, etc.) "
-        "AND AI/ML. List 2-3 specific projects. "
-        "Mention you can help with both areas.\n\n"
-        "PARAGRAPH 3: Short closing \u2014 resume attached, enthusiasm, "
-        "professional sign-off.\n\n"
+        "3rd year undergrad from PICT, Pune. Briefly explain why THIS company "
+        "interests you, then mention every internship listed in the Resume Summary "
+        "with the company and role in one concise sentence. This internship "
+        "experience must appear before the projects.\n\n"
+        "PARAGRAPH 2: Briefly mention full-stack development (React, Node.js, "
+        "Express, MongoDB). Describe AI/ML expertise as generative and agentic AI "
+        "using LangGraph and LangChain, supported by strong core machine-learning "
+        "fundamentals. Discuss ONLY these two projects: RentEasy and Data Scientist "
+        "AI Agent. Highlight that Data Scientist AI Agent is internationally "
+        "recognised, and explain how you can contribute. Do not mention Kaam Setu "
+        "or any other projects.\n\n"
+        "PARAGRAPH 3: Explain that you are joining ZS Associates as a full-time "
+        "employee next year, and are seeking an opportunity to join this company "
+        "until then so you can contribute meaningfully. Close with the resume "
+        "attachment and a professional sign-off.\n\n"
         "Rules:\n"
-        "- Use <b> tags for key words (name, company, skills, projects)\n"
-        "- 150\u2013200 words\n"
+        "- Bold the exact phrases 'internationally recognised' and 'ZS Associates' "
+        "using <b> tags, along with the company name and project names\n"
+        "- Return exactly three HTML <p>...</p> paragraphs followed by the sign-off\n"
+        "- Do not use <br> tags, empty paragraphs, or blank lines between paragraphs\n"
+        "- Keep it short-medium: 120-160 words, with no repetition or filler\n"
         "- No subject line in body\n"
         "- No placeholders like [Your Name]\n"
         "- Professional but enthusiastic tone\n"
+        "- Include the internships from the Resume Summary before discussing projects; "
+        "keep them to one brief sentence with no duties, dates, or extra detail\n"
         "- Best regards on a new line, name below it"
     )
 
     user_prompt = (
-        f"Write an internship application email for Full Stack Intern "
-        f"at {company_name}.\n\n"
+        f"Write an internship application email for Full Stack Intern at the "
+        f"company named exactly '{company_name}'. This is the authoritative "
+        f"recipient company name; never replace it with a name found in research.\n\n"
         f"Company Research:\n{company_research}\n\n"
         f"Resume Summary:\n{resume_summary}\n\n"
+        f"Use exactly this name in the sign-off: {candidate_name}\n\n"
         "Follow the structure and formatting rules above."
     )
 
@@ -132,6 +152,17 @@ def do_generate_email(company_name: str, company_research: str,
         HumanMessage(content=user_prompt),
     ])
     body = response.content.strip()
+    if not body:
+        raise ValueError("The model returned an empty outreach email. Please regenerate.")
+
+    if candidate_name:
+        body = re.sub(
+            r"(?is)<p>\s*(?:best regards|kind regards|sincerely|regards|thanks)[,:]?"
+            r"\s*(?:<br\s*/?>\s*)?[^<]*(?:</p>)?\s*$",
+            "",
+            body,
+        ).strip()
+        body += f"\n<p>Best regards,<br>{html.escape(candidate_name)}</p>"
 
     # Extract candidate name for subject line
     lines = resume_summary.split("\n")
@@ -153,7 +184,18 @@ def do_generate_email(company_name: str, company_research: str,
 def load_data_node(state: OutreachState) -> dict:
     """Node 1 — Read Excel + parse resume PDF."""
     df = pd.read_excel(state["excel_path"])
-    df.columns = [c.strip() for c in df.columns]
+    aliases = {
+        "company": "Company Name",
+        "company name": "Company Name",
+        "email": "Email ID",
+        "email id": "Email ID",
+        "industry": "Industry",
+        "location": "Location",
+    }
+    df = df.rename(columns={
+        column: aliases.get(str(column).strip().lower(), str(column).strip())
+        for column in df.columns
+    })
     companies = df.to_dict(orient="records")
 
     resume_data = parse_resume(state["resume_path"], state["groq_api_key"])
@@ -169,7 +211,7 @@ def research_company_node(state: OutreachState) -> dict:
     """Node 2 — Research the current company online."""
     company = state["companies"][state["current_index"]]
     result = do_research(
-        company_name=company.get("Company Name", company.get("company_name", "Unknown")),
+        company_name=company.get("Company Name", company.get("company_name", company.get("Company", "Unknown"))),
         industry=company.get("Industry", company.get("industry", "")),
         location=company.get("Location", company.get("location", "")),
         tavily_api_key=state["tavily_api_key"],
@@ -181,13 +223,14 @@ def research_company_node(state: OutreachState) -> dict:
 def generate_email_node(state: OutreachState) -> dict:
     """Node 3 — Draft a personalised outreach email."""
     company = state["companies"][state["current_index"]]
-    company_name = company.get("Company Name", company.get("company_name", "Unknown"))
+    company_name = company.get("Company Name", company.get("company_name", company.get("Company", "Unknown")))
 
     result = do_generate_email(
         company_name=company_name,
         company_research=state["company_research"],
         resume_summary=state["resume_summary"],
         groq_api_key=state["groq_api_key"],
+        candidate_name=state.get("candidate_name", ""),
     )
     return {
         "generated_email": result["body"],
@@ -206,7 +249,7 @@ def human_review_node(state: OutreachState) -> dict:
 def send_email_node(state: OutreachState) -> dict:
     """Node 5 — Send the approved email via SMTP and log result."""
     company = state["companies"][state["current_index"]]
-    company_name = company.get("Company Name", company.get("company_name", "Unknown"))
+    company_name = company.get("Company Name", company.get("company_name", company.get("Company", "Unknown")))
     to_email = company.get("Email ID", company.get("email_id", company.get("Email", "")))
 
     body = state.get("edited_email") or state["generated_email"]

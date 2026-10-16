@@ -5,9 +5,20 @@ Extract text from a resume PDF and produce a structured LLM summary
 for email personalisation.
 """
 
+import os
+import re
 from pypdf import PdfReader
 from langchain_groq import ChatGroq
 from langchain_core.messages import SystemMessage, HumanMessage
+
+
+def extract_candidate_name(raw_text: str) -> str:
+    """Return the first name-like heading from the uploaded resume."""
+    for line in raw_text.splitlines():
+        candidate = " ".join(line.split()).strip()
+        if re.fullmatch(r"[A-Za-z][A-Za-z.'-]*(?:\s+[A-Za-z][A-Za-z.'-]*)+", candidate):
+            return candidate
+    raise ValueError("Could not identify a person's name from the uploaded resume.")
 
 
 def extract_text_from_pdf(pdf_path: str) -> str:
@@ -20,7 +31,7 @@ def extract_text_from_pdf(pdf_path: str) -> str:
 def summarize_resume(raw_text: str, groq_api_key: str) -> str:
     """Send raw resume text to Groq LLM and get a structured summary."""
     llm = ChatGroq(
-        model="llama-3.3-70b-versatile",
+        model=os.getenv("GROQ_MODEL", "openai/gpt-oss-20b"),
         api_key=groq_api_key,
         temperature=0.3,
         max_tokens=600,
@@ -31,9 +42,10 @@ def summarize_resume(raw_text: str, groq_api_key: str) -> str:
         "produce a detailed summary covering:\n"
         "1. Full name\n"
         "2. Key technical skills (Full Stack + AI/ML)\n"
-        "3. ALL projects with 1-line descriptions\n"
-        "4. Education\n"
-        "5. Notable achievements or certifications\n\n"
+        "3. ALL internships with company names, roles, and 1-line descriptions\n"
+        "4. ALL projects with 1-line descriptions\n"
+        "5. Education\n"
+        "6. Notable achievements or certifications\n\n"
         "Keep it under 300 words. Output ONLY the summary."
     )
 

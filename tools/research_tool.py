@@ -5,6 +5,7 @@ Search the internet for company information using Tavily
 and return a structured LLM summary for email personalisation.
 """
 
+import os
 from tavily import TavilyClient
 from langchain_groq import ChatGroq
 from langchain_core.messages import SystemMessage, HumanMessage
@@ -18,7 +19,7 @@ def search_company(
 ) -> list[dict]:
     """Use Tavily to search for company info. Returns list of result dicts."""
     client = TavilyClient(api_key=tavily_api_key)
-    query = f"{company_name} company {industry} {location} what do they do"
+    query = f'"{company_name}" official company {industry} {location} what do they do'
     response = client.search(query=query, max_results=5)
     return response.get("results", [])
 
@@ -30,7 +31,7 @@ def summarize_company(
 ) -> str:
     """Feed raw search results into Groq LLM to get a concise company summary."""
     llm = ChatGroq(
-        model="llama-3.3-70b-versatile",
+        model=os.getenv("GROQ_MODEL", "openai/gpt-oss-20b"),
         api_key=groq_api_key,
         temperature=0.3,
         max_tokens=400,
@@ -43,6 +44,9 @@ def summarize_company(
 
     system_prompt = (
         "You are a research assistant. Given search results about a company, "
+        "Treat the provided company name as authoritative. Ignore any source "
+        "that refers to a different company and never identify the company as "
+        "anything other than the provided name. "
         "produce a concise summary (under 100 words) covering:\n"
         "1. What the company does\n"
         "2. Industry / domain\n"
@@ -55,7 +59,8 @@ def summarize_company(
         SystemMessage(content=system_prompt),
         HumanMessage(content=f"Company: {company_name}\n\nSearch results:\n{combined}"),
     ])
-    return response.content.strip()
+    summary = response.content.strip()
+    return f"Research for {company_name}: {summary}"
 
 
 def research_company(
@@ -71,6 +76,13 @@ def research_company(
     This is the main function called by the Outreach Agent.
     """
     results = search_company(company_name, industry, location, tavily_api_key)
+    company_key = company_name.casefold().strip()
+    results = [
+        result for result in results
+        if company_key in (
+            f"{result.get('title', '')} {result.get('content', '')}"
+        ).casefold()
+    ]
     if not results:
         return (
             f"{company_name} is a company in the {industry} industry "

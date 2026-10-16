@@ -24,7 +24,7 @@ This project is a **fully functional AI email automation system** that uses Lang
 ## ✨ Features
 
 - 🤖 **LangGraph Agents** — Each system is a proper LangGraph `StateGraph` with nodes, edges, conditional routing, and interrupt-based human review
-- 🧠 **Groq LLM (Free)** — Uses `llama-3.3-70b-versatile` via Groq's free API for all text generation
+- 🧠 **Groq LLM** — Uses `openai/gpt-oss-20b` by default; override it with `GROQ_MODEL`
 - 📬 **Gmail IMAP/SMTP** — Reads inbox via IMAP and sends via SMTP using App Passwords
 - 🔍 **Tavily Web Search** — Researches companies online before generating outreach emails
 - 📄 **Resume Parsing** — Extracts text from PDF resumes and generates structured summaries
@@ -119,7 +119,7 @@ generate_email ──→ human_review
 
 | Component | Technology | Cost |
 |-----------|-----------|------|
-| **LLM** | Groq (`llama-3.3-70b-versatile`) | Free |
+| **LLM** | Groq (`openai/gpt-oss-20b`, configurable via `GROQ_MODEL`) | Free tier |
 | **Agent Framework** | LangGraph (`StateGraph`) | Free |
 | **Web Search** | Tavily API | Free tier |
 | **Email Send** | Python `smtplib` (SMTP) | Free |
@@ -213,7 +213,7 @@ The app opens at `http://localhost:8501` with three tabs.
 1. Enter recipient email, topic, and select tone
 2. Click **Generate Email** — AI creates subject + body
 3. **Review** the email — edit if needed
-4. Click **Send Email**, **Regenerate**, or **Discard**
+4. Click **Send Email**, **Regenerate**, or **Discard** Sending using **SMTP**
 
 ---
 
